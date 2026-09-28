@@ -16,14 +16,20 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
-TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
-TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "")
+# Clean and format Telegram credentials (prevent 404 errors from extra 'bot' prefix or whitespace)
+raw_token = os.environ.get("TG_BOT_TOKEN", "").strip()
+if raw_token.lower().startswith("bot"):
+    TG_BOT_TOKEN = raw_token[3:].strip()
+else:
+    TG_BOT_TOKEN = raw_token
+
+TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 STATE_FILE = "trade_state.json"
 
 def send_telegram_message(message: str):
-    """发送 Telegram 消息"""
+    """发送 Telegram 消息 (含自动容错与格式清理)"""
     if not TG_BOT_TOKEN or not TG_CHAT_ID:
-        print("Warning: TG_BOT_TOKEN or TG_CHAT_ID not set. Outputting message locally:\n")
+        print("Warning: TG_BOT_TOKEN or TG_CHAT_ID not set in environment. Printing message locally:\n")
         print(message)
         return
     
@@ -36,23 +42,24 @@ def send_telegram_message(message: str):
     try:
         res = requests.post(url, json=payload, timeout=10)
         if res.status_code == 200:
-            print("Telegram message sent successfully.")
+            print("Telegram message sent successfully!")
         else:
-            print(f"Failed to send Telegram message: {res.text}")
+            print(f"Failed to send Telegram message. HTTP Status: {res.status_code}, Response: {res.text}")
+            print(f"Constructed API URL: https://api.telegram.org/bot{TG_BOT_TOKEN[:5]}...{TG_BOT_TOKEN[-5:]}/sendMessage")
     except Exception as e:
         print(f"Error sending Telegram message: {e}")
 
 def fetch_btc_data():
     """获取 BTC/USDT 最新日线数据 (全量 fallback 链，防止 HTTP 451 区域限制)"""
     urls = [
-        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200', # CI / 部署环境首选 (无地域限制)
-        'https://api-gcp.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',    # Google Cloud 镜像节点
-        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',        # 全球主节点
-        'https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',       # 备用节点 1
-        'https://api2.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',       # 备用节点 2
-        'https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',       # 备用节点 3
-        'https://api4.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',       # 备用节点 4
-        'https://api.binance.us/api/v3/klines?symbol=BTCUSD&interval=1d&limit=200'          # 美区官方节点
+        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
+        'https://api-gcp.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
+        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
+        'https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
+        'https://api2.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
+        'https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
+        'https://api4.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
+        'https://api.binance.us/api/v3/klines?symbol=BTCUSD&interval=1d&limit=200'
     ]
     
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -67,7 +74,7 @@ def fetch_btc_data():
                     print(f"Successfully fetched BTC data from {url}")
                     break
         except Exception as e:
-            print(f"Endpoint {url} failed ({e}), trying next fallback in chain...")
+            print(f"Endpoint {url} failed ({e}), trying next fallback...")
             
     if not data:
         raise RuntimeError("All Binance API fallback nodes failed. Unable to fetch BTC daily price data.")
@@ -81,11 +88,19 @@ def fetch_btc_data():
     return df[['date', 'open', 'high', 'low', 'close', 'volume']].sort_values('date').reset_index(drop=True)
 
 def fetch_farside_etf_data():
-    """获取 Farside 比特币 ETF 每日净流入数据 (支持 Cloudflare 防火墙绕过与降级防护)"""
+    """获取 Farside 比特币 ETF 每日净流入数据 (支持 Cloudflare 拟真头绕过)"""
     urls = [
         'https://farside.co.uk/bitcoin-etf-flow-all-data/',
         'https://farside.co.uk/btc/'
     ]
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+    }
     
     parsed = []
     html_text = ""
@@ -94,7 +109,7 @@ def fetch_farside_etf_data():
         from curl_cffi import requests as c_requests
         for url in urls:
             try:
-                res = c_requests.get(url, impersonate='chrome120', timeout=15)
+                res = c_requests.get(url, headers=headers, impersonate='chrome120', timeout=15)
                 if res.status_code == 200:
                     html_text = res.text
                     print(f"Successfully fetched Farside via curl_cffi from {url}")
@@ -105,11 +120,6 @@ def fetch_farside_etf_data():
         print("curl_cffi not installed, using standard requests.")
 
     if not html_text:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9'
-        }
         for url in urls:
             try:
                 res = requests.get(url, headers=headers, timeout=15)
