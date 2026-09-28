@@ -43,14 +43,19 @@ def send_telegram_message(message: str):
         print(f"Error sending Telegram message: {e}")
 
 def fetch_btc_data():
-    """获取 BTC/USDT 最新日线数据 (支持多节点备用，防止 451 区域限制)"""
+    """获取 BTC/USDT 最新日线数据 (全量 fallback 链，防止 HTTP 451 区域限制)"""
     urls = [
-        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
-        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
-        'https://api.binance.us/api/v3/klines?symbol=BTCUSD&interval=1d&limit=200'
+        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200', # CI / 部署环境首选 (无地域限制)
+        'https://api-gcp.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',    # Google Cloud 镜像节点
+        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',        # 全球主节点
+        'https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',       # 备用节点 1
+        'https://api2.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',       # 备用节点 2
+        'https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',       # 备用节点 3
+        'https://api4.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',       # 备用节点 4
+        'https://api.binance.us/api/v3/klines?symbol=BTCUSD&interval=1d&limit=200'          # 美区官方节点
     ]
     
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     data = None
     
     for url in urls:
@@ -62,10 +67,10 @@ def fetch_btc_data():
                     print(f"Successfully fetched BTC data from {url}")
                     break
         except Exception as e:
-            print(f"Endpoint {url} failed: {e}, trying fallback...")
+            print(f"Endpoint {url} failed ({e}), trying next fallback in chain...")
             
     if not data:
-        raise RuntimeError("All BTC API endpoints failed. Unable to fetch BTC daily price data.")
+        raise RuntimeError("All Binance API fallback nodes failed. Unable to fetch BTC daily price data.")
 
     df = pd.DataFrame(data, columns=['open_time', 'open', 'high', 'low', 'close', 'volume', 
                                     'close_time', 'qav', 'num_trades', 'taker_base_vol', 'taker_quote_vol', 'ignore'])
@@ -85,7 +90,6 @@ def fetch_farside_etf_data():
     parsed = []
     html_text = ""
     
-    # 优先使用 curl_cffi 伪装真实 Chrome 指纹绕过 Cloudflare 5秒盾
     try:
         from curl_cffi import requests as c_requests
         for url in urls:
@@ -100,7 +104,6 @@ def fetch_farside_etf_data():
     except ImportError:
         print("curl_cffi not installed, using standard requests.")
 
-    # 降级备用: 使用 requests 标准库
     if not html_text:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
