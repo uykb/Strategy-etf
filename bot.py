@@ -16,7 +16,7 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
-# Clean and format Telegram credentials (prevent 404 errors from extra 'bot' prefix or whitespace)
+# Clean and format Telegram credentials
 raw_token = os.environ.get("TG_BOT_TOKEN", "").strip()
 if raw_token.lower().startswith("bot"):
     TG_BOT_TOKEN = raw_token[3:].strip()
@@ -27,7 +27,7 @@ TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 STATE_FILE = "trade_state.json"
 
 def send_telegram_message(message: str):
-    """发送 Telegram 消息 (含自动容错与格式清理)"""
+    """发送 Telegram 消息"""
     if not TG_BOT_TOKEN or not TG_CHAT_ID:
         print("Warning: TG_BOT_TOKEN or TG_CHAT_ID not set in environment. Printing message locally:\n")
         print(message)
@@ -45,7 +45,6 @@ def send_telegram_message(message: str):
             print("Telegram message sent successfully!")
         else:
             print(f"Failed to send Telegram message. HTTP Status: {res.status_code}, Response: {res.text}")
-            print(f"Constructed API URL: https://api.telegram.org/bot{TG_BOT_TOKEN[:5]}...{TG_BOT_TOKEN[-5:]}/sendMessage")
     except Exception as e:
         print(f"Error sending Telegram message: {e}")
 
@@ -88,23 +87,30 @@ def fetch_btc_data():
     return df[['date', 'open', 'high', 'low', 'close', 'volume']].sort_values('date').reset_index(drop=True)
 
 def fetch_farside_etf_data():
-    """获取 Farside 比特币 ETF 每日净流入数据 (支持 Cloudflare 拟真头绕过)"""
+    """获取 Farside 比特币 ETF 每日净流入数据 (拟真 Chrome 指纹绕过 Cloudflare)"""
     urls = [
         'https://farside.co.uk/bitcoin-etf-flow-all-data/',
         'https://farside.co.uk/btc/'
     ]
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache'
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1'
     }
     
     parsed = []
     html_text = ""
     
+    # 优先使用 curl_cffi 伪装真实 Chrome 指纹
     try:
         from curl_cffi import requests as c_requests
         for url in urls:
@@ -119,6 +125,7 @@ def fetch_farside_etf_data():
     except ImportError:
         print("curl_cffi not installed, using standard requests.")
 
+    # 降级备用: 使用 requests 标准库
     if not html_text:
         for url in urls:
             try:
@@ -142,7 +149,7 @@ def fetch_farside_etf_data():
                     parsed.append({'date_str': cols[0], 'etf_flow': val})
 
     if len(parsed) == 0:
-        print("Warning: Farside parsing yielded 0 rows due to cloud block. Returning empty fallback.")
+        print("Warning: Farside parsing yielded 0 rows. Using empty fallback dataframe.")
         return pd.DataFrame(columns=['date', 'etf_flow'])
 
     df_etf = pd.DataFrame(parsed)
@@ -345,9 +352,10 @@ def run_daily_bot():
             send_telegram_message(msg)
 
         else:
+            flow_note = f"${s_flow:.1f}M" if s_flow != 0 else "$0.0M (市场休市或数据结算中)"
             msg = f"""💤 **BTC ETF 策略今日观望 (FLAT)**
 📅 **日期**: {dt_today}
-📊 **前日信号**: ETF资金流 ${s_flow:.1f}M | SOPR 28MA = {s_sopr:.4f}
+📊 **前日信号**: ETF资金流 {flow_note} | SOPR 28MA = {s_sopr:.4f}
 当前无持仓，等待下一个“ETF + SOPR”共振信号。
 """
             send_telegram_message(msg)
