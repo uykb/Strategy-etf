@@ -45,7 +45,7 @@ def send_telegram_message(message: str):
 def fetch_btc_data():
     """获取 BTC/USDT 最新日线数据 (支持多节点备用，防止 451 区域限制)"""
     urls = [
-        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200', # 官方无地域限制节点
+        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
         'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
         'https://api.binance.us/api/v3/klines?symbol=BTCUSD&interval=1d&limit=200'
     ]
@@ -76,18 +76,62 @@ def fetch_btc_data():
     return df[['date', 'open', 'high', 'low', 'close', 'volume']].sort_values('date').reset_index(drop=True)
 
 def fetch_farside_etf_data():
-    """获取 Farside 比特币 ETF 每日净流入数据"""
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    res = requests.get('https://farside.co.uk/bitcoin-etf-flow-all-data/', headers=headers, timeout=15)
-    soup = BeautifulSoup(res.text, 'html.parser')
+    """获取 Farside 比特币 ETF 每日净流入数据 (支持 Cloudflare 防火墙绕过与降级防护)"""
+    urls = [
+        'https://farside.co.uk/bitcoin-etf-flow-all-data/',
+        'https://farside.co.uk/btc/'
+    ]
+    
     parsed = []
-    table = soup.find_all('table')[0]
-    for r in table.find_all('tr'):
-        cols = [c.get_text(strip=True) for c in r.find_all(['td', 'th'])]
-        if len(cols) >= 2 and re.search(r'\d{1,2}\s+[A-Za-z]{3}\s+\d{4}', cols[0]):
-            val_str = cols[-1].replace('$', '').replace(',', '').strip()
-            val = -float(val_str[1:-1]) if val_str.startswith('(') and val_str.endswith(')') else (float(val_str) if val_str not in ['-', '', 'NaN'] else 0.0)
-            parsed.append({'date_str': cols[0], 'etf_flow': val})
+    html_text = ""
+    
+    # 优先使用 curl_cffi 伪装真实 Chrome 指纹绕过 Cloudflare 5秒盾
+    try:
+        from curl_cffi import requests as c_requests
+        for url in urls:
+            try:
+                res = c_requests.get(url, impersonate='chrome120', timeout=15)
+                if res.status_code == 200:
+                    html_text = res.text
+                    print(f"Successfully fetched Farside via curl_cffi from {url}")
+                    break
+            except Exception as e:
+                print(f"curl_cffi fetch {url} failed: {e}")
+    except ImportError:
+        print("curl_cffi not installed, using standard requests.")
+
+    # 降级备用: 使用 requests 标准库
+    if not html_text:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9'
+        }
+        for url in urls:
+            try:
+                res = requests.get(url, headers=headers, timeout=15)
+                if res.status_code == 200:
+                    html_text = res.text
+                    print(f"Successfully fetched Farside via requests from {url}")
+                    break
+            except Exception as e:
+                print(f"requests fetch {url} failed: {e}")
+
+    if html_text:
+        soup = BeautifulSoup(html_text, 'html.parser')
+        tables = soup.find_all('table')
+        if len(tables) > 0:
+            for r in tables[0].find_all('tr'):
+                cols = [c.get_text(strip=True) for c in r.find_all(['td', 'th'])]
+                if len(cols) >= 2 and re.search(r'\d{1,2}\s+[A-Za-z]{3}\s+\d{4}', cols[0]):
+                    val_str = cols[-1].replace('$', '').replace(',', '').strip()
+                    val = -float(val_str[1:-1]) if val_str.startswith('(') and val_str.endswith(')') else (float(val_str) if val_str not in ['-', '', 'NaN'] else 0.0)
+                    parsed.append({'date_str': cols[0], 'etf_flow': val})
+
+    if len(parsed) == 0:
+        print("Warning: Farside parsing yielded 0 rows due to cloud block. Returning empty fallback.")
+        return pd.DataFrame(columns=['date', 'etf_flow'])
+
     df_etf = pd.DataFrame(parsed)
     df_etf['date'] = pd.to_datetime(df_etf['date_str'], format='%d %b %Y', errors='coerce')
     return df_etf.dropna(subset=['date']).sort_values('date')[['date', 'etf_flow']].drop_duplicates(subset=['date']).reset_index(drop=True)
