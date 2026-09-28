@@ -43,11 +43,30 @@ def send_telegram_message(message: str):
         print(f"Error sending Telegram message: {e}")
 
 def fetch_btc_data():
-    """获取 Binance BTC/USDT 最新日线数据"""
-    url = 'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200'
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req) as response:
-        data = json.loads(response.read().decode())
+    """获取 BTC/USDT 最新日线数据 (支持多节点备用，防止 451 区域限制)"""
+    urls = [
+        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200', # 官方无地域限制节点
+        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
+        'https://api.binance.us/api/v3/klines?symbol=BTCUSD&interval=1d&limit=200'
+    ]
+    
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    data = None
+    
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode())
+                    print(f"Successfully fetched BTC data from {url}")
+                    break
+        except Exception as e:
+            print(f"Endpoint {url} failed: {e}, trying fallback...")
+            
+    if not data:
+        raise RuntimeError("All BTC API endpoints failed. Unable to fetch BTC daily price data.")
+
     df = pd.DataFrame(data, columns=['open_time', 'open', 'high', 'low', 'close', 'volume', 
                                     'close_time', 'qav', 'num_trades', 'taker_base_vol', 'taker_quote_vol', 'ignore'])
     df['date'] = pd.to_datetime(df['open_time'], unit='ms').dt.date
