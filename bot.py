@@ -163,13 +163,36 @@ def fetch_farside_etf_data():
             except Exception as e:
                 print(f"requests fetch {url} failed: {e}")
 
+    ETF_CACHE_FILE = "etf_cache.json"
+
     if len(parsed) == 0:
-        print("Warning: Farside parsing yielded 0 rows. Returning empty fallback dataframe.")
+        print("Warning: Farside parsing yielded 0 rows. Attempting to restore from local etf_cache.json...")
+        if os.path.exists(ETF_CACHE_FILE):
+            try:
+                with open(ETF_CACHE_FILE, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                df_cached = pd.DataFrame(cache_data)
+                df_cached['date'] = pd.to_datetime(df_cached['date'])
+                print(f"Successfully restored {len(df_cached)} ETF flow rows from local cache.")
+                return df_cached.sort_values('date')[['date', 'etf_flow']].drop_duplicates(subset=['date']).reset_index(drop=True)
+            except Exception as e:
+                print(f"Error loading ETF cache: {e}")
+        print("Warning: No local ETF cache available. Returning empty fallback dataframe.")
         return pd.DataFrame(columns=['date', 'etf_flow'])
 
     df_etf = pd.DataFrame(parsed)
     df_etf['date'] = pd.to_datetime(df_etf['date_str'], format='%d %b %Y', errors='coerce')
-    return df_etf.dropna(subset=['date']).sort_values('date')[['date', 'etf_flow']].drop_duplicates(subset=['date']).reset_index(drop=True)
+    df_clean = df_etf.dropna(subset=['date']).sort_values('date')[['date', 'etf_flow']].drop_duplicates(subset=['date']).reset_index(drop=True)
+    
+    # Save cache to disk for future fallbacks
+    try:
+        cache_data = df_clean.to_dict(orient='records')
+        with open(ETF_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache_data, f, default=str, indent=2)
+    except Exception as e:
+        print(f"Failed to write ETF cache: {e}")
+        
+    return df_clean
 
 def fetch_hyperliquid_position(wallet_address: str):
     """直接调用 Hyperliquid L1 API 查询指定钱包地址的 BTC 链上真实持仓"""
@@ -319,8 +342,9 @@ def run_daily_bot():
     # 提取美股最新交易日的具体数值与日期
     if not df_etf.empty:
         latest_etf_row = df_etf.iloc[-1]
+        latest_etf_date = latest_etf_row['date'].strftime('%m-%d')
         latest_etf_val = latest_etf_row['etf_flow']
-        etf_display_str = f"${latest_etf_val:+.1f}M"
+        etf_display_str = f"${latest_etf_val:+.1f}M ({latest_etf_date})"
     else:
         etf_display_str = f"${row_prev['etf_flow']:+.1f}M (数据暂缺)"
         
@@ -439,9 +463,9 @@ def run_daily_bot():
             
             state["pos_state"] = 1; state["entry_price"] = entry_p; state["sl_price"] = sl_p; state["tp_price"] = tp_p; save_state(state)
             
-            msg = f"""🚀 **BTC ETF + SOPR 开仓信号 (LONG)**
+            msg = f"""🚀 **BTC ETF + SOPR 开仓信号提醒 (LONG)**
 📅 **日期**: {dt_today}
-⚡ **建议行动**: 请前往 **Hyperliquid** 建立 **多头仓位**
+⚡ **建议行动**: 请前往 **Hyperliquid** 手动建立 **多头仓位**
 📈 **推荐仓位**: 现货/永续 {pos_w*100:.0f}%
 💵 **建议建仓参考价**: ${entry_p:,.2f}
 🛑 **建议设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
@@ -458,9 +482,9 @@ def run_daily_bot():
             
             state["pos_state"] = -1; state["entry_price"] = entry_p; state["sl_price"] = sl_p; state["tp_price"] = tp_p; save_state(state)
             
-            msg = f"""📉 **BTC ETF + SOPR 开仓信号 (SHORT)**
+            msg = f"""📉 **BTC ETF + SOPR 开仓信号提醒 (SHORT)**
 📅 **日期**: {dt_today}
-⚡ **建议行动**: 请前往 **Hyperliquid** 建立 **2倍永续空单**
+⚡ **建议行动**: 请前往 **Hyperliquid** 手动建立 **2倍永续空单**
 📉 **推荐仓位**: 名义空头 {pos_w*100:.0f}%
 💵 **建议建仓参考价**: ${entry_p:,.2f}
 🛑 **建议设置止损 (-1.5x ATR)**: ${sl_p:,.2f}

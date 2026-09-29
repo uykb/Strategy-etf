@@ -1,9 +1,9 @@
 {
-    "pos_state": 1,
+    "pos_state": 0,
     "pos_weight": 0.0,
-    "entry_price": 83500.01,
-    "sl_price": 79884.43999999999,
-    "tp_price": 91936.34,
+    "entry_price": 0.0,
+    "sl_price": 0.0,
+    "tp_price": 0.0,
     "entry_date": "",
     "equity": 1000.0
 }
