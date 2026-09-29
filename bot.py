@@ -16,7 +16,7 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
-# Telegram credentials
+# Clean and format Telegram credentials
 raw_token = os.environ.get("TG_BOT_TOKEN", "").strip()
 if raw_token.lower().startswith("bot"):
     TG_BOT_TOKEN = raw_token[3:].strip()
@@ -88,7 +88,7 @@ def fetch_btc_data():
     return df[['date', 'open', 'high', 'low', 'close', 'volume']].sort_values('date').reset_index(drop=True)
 
 def fetch_farside_etf_data():
-    """获取 Farside 比特币 ETF 每日净流入数据"""
+    """获取 Farside 比特币 ETF 每日净流入数据 (拟真 Chrome 指纹绕过 Cloudflare)"""
     urls = [
         'https://farside.co.uk/bitcoin-etf-flow-all-data/',
         'https://farside.co.uk/btc/'
@@ -148,7 +148,7 @@ def fetch_farside_etf_data():
                     parsed.append({'date_str': cols[0], 'etf_flow': val})
 
     if len(parsed) == 0:
-        print("Warning: Farside parsing yielded 0 rows. Using empty fallback dataframe.")
+        print("Warning: Farside parsing yielded 0 rows due to cloud block. Returning empty fallback.")
         return pd.DataFrame(columns=['date', 'etf_flow'])
 
     df_etf = pd.DataFrame(parsed)
@@ -219,8 +219,10 @@ def run_daily_bot():
     df_btc = fetch_btc_data()
     df_etf = fetch_farside_etf_data()
     
+    # 修复 ETF 数据的合并与 Forward Fill (前向填充休市日/尚未发布日)
     df = pd.merge(df_btc, df_etf, on='date', how='left')
-    df['etf_flow'] = df['etf_flow'].fillna(0.0)
+    df['etf_flow_raw'] = df['etf_flow'] # 保存未填充的原始流动
+    df['etf_flow'] = df['etf_flow'].ffill().fillna(0.0) # 前向填充上一个美组交易日的流入量
     
     # 指标计算
     prev_close = df['close'].shift(1)
@@ -239,6 +241,15 @@ def run_daily_bot():
     low_today = row_today['low']
     open_today = row_today['open']
     
+    # 获取美股最新的实际 ETF 数据行与日期
+    if not df_etf.empty:
+        latest_etf_row = df_etf.iloc[-1]
+        latest_etf_date = latest_etf_row['date'].strftime('%m-%d')
+        latest_etf_val = latest_etf_row['etf_flow']
+        etf_display_str = f"${latest_etf_val:+.1f}M ({latest_etf_date})"
+    else:
+        etf_display_str = f"${row_prev['etf_flow']:+.1f}M"
+        
     s_flow = row_prev['etf_flow']
     s_sopr = row_prev['sopr_28ma']
     s_atr = row_prev['atr_14']
@@ -283,7 +294,7 @@ def run_daily_bot():
             if exited:
                 msg = f"""{exit_reason}
 📅 **日期**: {dt_today}
-⚡ **链上平台**: Hyperliquid (钱包: `{HYPERLIQUID_WALLET[:6]}...{HYPERLIQUID_WALLET[-4:]}` if HYPERLIQUID_WALLET else '模拟')
+⚡ **链上平台**: Hyperliquid
 📈 **方向**: 多头 (LONG)
 💵 **链上开仓价**: ${entry_p:,.2f}
 当前 BTC 价格: ${close_today:,.2f}
@@ -310,7 +321,7 @@ def run_daily_bot():
             if exited:
                 msg = f"""{exit_reason}
 📅 **日期**: {dt_today}
-⚡ **链上平台**: Hyperliquid (钱包: `{HYPERLIQUID_WALLET[:6]}...{HYPERLIQUID_WALLET[-4:]}` if HYPERLIQUID_WALLET else '模拟')
+⚡ **链上平台**: Hyperliquid
 📉 **方向**: 空头 (SHORT)
 💵 **链上开仓价**: ${entry_p:,.2f}
 当前 BTC 价格: ${close_today:,.2f}
@@ -361,7 +372,7 @@ def run_daily_bot():
 💵 **建议建仓参考价**: ${entry_p:,.2f}
 🛑 **建议设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
 🎯 **建议设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
-📊 **前日信号**: ETF流入 ${s_flow:.1f}M | SOPR={s_sopr:.4f}
+📊 **前日信号**: ETF资金流 {etf_display_str} | SOPR={s_sopr:.4f}
 """
             send_telegram_message(msg)
 
@@ -380,15 +391,14 @@ def run_daily_bot():
 💵 **建议建仓参考价**: ${entry_p:,.2f}
 🛑 **建议设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
 🎯 **建议设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
-📊 **前日信号**: ETF流出 ${s_flow:.1f}M | SOPR={s_sopr:.4f}
+📊 **前日信号**: ETF资金流 {etf_display_str} | SOPR={s_sopr:.4f}
 """
             send_telegram_message(msg)
 
         else:
-            flow_note = f"${s_flow:.1f}M" if s_flow != 0 else "$0.0M (休市)"
             msg = f"""💤 **Hyperliquid 策略今日观望 (FLAT)**
 📅 **日期**: {dt_today}
-📊 **前日信号**: ETF资金流 {flow_note} | SOPR 28MA = {s_sopr:.4f}
+📊 **最新美股交易日**: ETF资金流 {etf_display_str} | SOPR 28MA = {s_sopr:.4f}
 Hyperliquid 当前无持仓，等待下一个开仓信号。
 """
             send_telegram_message(msg)

@@ -2,8 +2,11 @@ name: BTC ETF Strategy Daily Telegram Bot
 
 on:
   schedule:
-    # 每天 UTC 时间 00:30 自动运行 (对应北京时间 08:30 AM，美股收盘且 Farside ETF 数据已更新)
-    - cron: '30 0 * * *'
+    # 避开 UTC 00:00 - 00:30 全球高峰拥堵期
+    # cron 1: 北京时间 08:45 AM 自动运行
+    - cron: '45 0 * * *'
+    # cron 2: 北京时间 09:15 AM 补充轮询 (确保美股闭市及 Farside 数据已完全入库)
+    - cron: '15 1 * * 1-5'
   workflow_dispatch: # 支持在 GitHub 网页界面随时手动点击运行测试
 
 jobs:
@@ -31,6 +34,7 @@ jobs:
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          HYPERLIQUID_WALLET: ${{ secrets.HYPERLIQUID_WALLET }}
         run: |
           python bot.py
 
