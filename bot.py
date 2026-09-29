@@ -52,14 +52,14 @@ def send_telegram_message(message: str):
 def fetch_btc_data():
     """获取 BTC/USDT 最新日线数据 (全量 fallback 链)"""
     urls = [
-        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
-        'https://api-gcp.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
-        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
-        'https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
-        'https://api2.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
-        'https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
-        'https://api4.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=200',
-        'https://api.binance.us/api/v3/klines?symbol=BTCUSD&interval=1d&limit=200'
+        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=300',
+        'https://api-gcp.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=300',
+        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=300',
+        'https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=300',
+        'https://api2.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=300',
+        'https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=300',
+        'https://api4.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=300',
+        'https://api.binance.us/api/v3/klines?symbol=BTCUSD&interval=1d&limit=300'
     ]
     
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -230,10 +230,70 @@ def save_state(state):
     with open(STATE_FILE, 'w', encoding='utf-8') as f:
         json.dump(state, f, indent=4, ensure_ascii=False)
 
+def calculate_ahr999(df_btc):
+    """
+    计算 AHR999 囤币指标 (仅供推送参考，不参与交易决策)
+    使用 2026 重拟参数: slope = 5.64, intercept = 16.33
+    公式: AHR999 = (现价 / 200日几何均值) * (现价 / 指数拟合估值)
+    Genesis = 2009-01-03
+    """
+    if df_btc is None or len(df_btc) < 200:
+        return None
+        
+    try:
+        row_today = df_btc.iloc[-1]
+        close_today = float(row_today['close'])
+        date_val = row_today['date']
+        date_today = date_val.date() if hasattr(date_val, 'date') else date_val
+
+        # 200 日几何均值 (Geometric Mean)
+        close_200 = df_btc['close'].iloc[-200:].astype(float)
+        gm200 = float(np.exp(np.log(close_200).mean()))
+
+        # 币龄天数 (比特币创世块 2009-01-03)
+        genesis = datetime.date(2009, 1, 3)
+        age_days = (date_today - genesis).days
+        if age_days <= 0:
+            return None
+
+        log_age = np.log10(age_days)
+
+        # 2026 新重拟参数 (slope = 5.64, intercept = 16.33)
+        fit_2026 = 10 ** (5.64 * log_age - 16.33)
+        ahr_2026 = (close_today / gm200) * (close_today / fit_2026)
+
+        if ahr_2026 < 0.45:
+            zone_str = "💚 抄底区间 (<0.45)"
+        elif ahr_2026 < 1.2:
+            zone_str = "💛 定投区间 (0.45~1.2)"
+        else:
+            zone_str = "🔴 止投区间 (≥1.2)"
+
+        return {
+            "ahr_2026": ahr_2026,
+            "zone_2026": zone_str,
+            "gm200": gm200
+        }
+    except Exception as e:
+        print(f"Error calculating AHR999: {e}")
+        return None
+
+def format_ahr999_message(ahr_info):
+    if not ahr_info:
+        return ""
+    return (
+        f"💡  **AHR999**: `{ahr_info['ahr_2026']:.4f}` | {ahr_info['zone_2026']}\n"
+        f"💰 **200日定投成本(GM200)**: `${ahr_info['gm200']:,.2f}`"
+    )
+
 def run_daily_bot():
     print("=== 开始运行 BTC ETF + SOPR 每日策略机器人 ===")
     df_btc = fetch_btc_data()
     df_etf = fetch_farside_etf_data()
+    
+    # 计算 AHR999 囤币指标 (仅供推送，不参与策略决策)
+    ahr_info = calculate_ahr999(df_btc)
+    ahr_str = format_ahr999_message(ahr_info)
     
     # 避免周末与发布延迟导致 fillna(0.0) 抹零，改用 ffill()
     df = pd.merge(df_btc, df_etf, on='date', how='left')
@@ -259,9 +319,8 @@ def run_daily_bot():
     # 提取美股最新交易日的具体数值与日期
     if not df_etf.empty:
         latest_etf_row = df_etf.iloc[-1]
-        latest_etf_date = latest_etf_row['date'].strftime('%m-%d')
         latest_etf_val = latest_etf_row['etf_flow']
-        etf_display_str = f"${latest_etf_val:+.1f}M ({latest_etf_date})"
+        etf_display_str = f"${latest_etf_val:+.1f}M"
     else:
         etf_display_str = f"${row_prev['etf_flow']:+.1f}M (数据暂缺)"
         
@@ -315,7 +374,7 @@ def run_daily_bot():
 当前 BTC 价格: ${close_today:,.2f}
 🛑 **止损触发价**: ${sl_p:,.2f}
 🎯 **止盈触发价**: ${tp_p:,.2f}
-"""
+{ahr_str}"""
                 send_telegram_message(msg)
                 state["pos_state"] = 0; save_state(state)
                 return
@@ -342,7 +401,7 @@ def run_daily_bot():
 当前 BTC 价格: ${close_today:,.2f}
 🛑 **止损触发价**: ${sl_p:,.2f}
 🎯 **止盈触发价**: ${tp_p:,.2f}
-"""
+{ahr_str}"""
                 send_telegram_message(msg)
                 state["pos_state"] = 0; save_state(state)
                 return
@@ -364,7 +423,7 @@ def run_daily_bot():
 当前 BTC 价格: ${close_today:,.2f}
 🛑 **止损参考价 (-1.5x ATR)**: ${sl_p:,.2f} (距止损 {dist_sl:.2f}%)
 🎯 **止盈参考价 (+3.5x ATR)**: ${tp_p:,.2f} (距止盈 {dist_tp:.2f}%)
-"""
+{ahr_str}"""
             send_telegram_message(msg)
             return
 
@@ -380,15 +439,15 @@ def run_daily_bot():
             
             state["pos_state"] = 1; state["entry_price"] = entry_p; state["sl_price"] = sl_p; state["tp_price"] = tp_p; save_state(state)
             
-            msg = f"""🚀 **BTC ETF + SOPR 开仓信号提醒 (LONG)**
+            msg = f"""🚀 **BTC ETF + SOPR 开仓信号 (LONG)**
 📅 **日期**: {dt_today}
-⚡ **建议行动**: 请前往 **Hyperliquid** 手动建立 **多头仓位**
+⚡ **建议行动**: 请前往 **Hyperliquid** 建立 **多头仓位**
 📈 **推荐仓位**: 现货/永续 {pos_w*100:.0f}%
 💵 **建议建仓参考价**: ${entry_p:,.2f}
 🛑 **建议设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
 🎯 **建议设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
 📊 **前日信号**: ETF资金流 {etf_display_str} | SOPR={s_sopr:.4f}
-"""
+{ahr_str}"""
             send_telegram_message(msg)
 
         elif s_flow < 0 and s_sopr < 1.0: # 触发做空
@@ -399,15 +458,15 @@ def run_daily_bot():
             
             state["pos_state"] = -1; state["entry_price"] = entry_p; state["sl_price"] = sl_p; state["tp_price"] = tp_p; save_state(state)
             
-            msg = f"""📉 **BTC ETF + SOPR 开仓信号提醒 (SHORT)**
+            msg = f"""📉 **BTC ETF + SOPR 开仓信号 (SHORT)**
 📅 **日期**: {dt_today}
-⚡ **建议行动**: 请前往 **Hyperliquid** 手动建立 **2倍永续空单**
+⚡ **建议行动**: 请前往 **Hyperliquid** 建立 **2倍永续空单**
 📉 **推荐仓位**: 名义空头 {pos_w*100:.0f}%
 💵 **建议建仓参考价**: ${entry_p:,.2f}
 🛑 **建议设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
 🎯 **建议设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
 📊 **前日信号**: ETF资金流 {etf_display_str} | SOPR={s_sopr:.4f}
-"""
+{ahr_str}"""
             send_telegram_message(msg)
 
         else:
@@ -415,7 +474,7 @@ def run_daily_bot():
 📅 **日期**: {dt_today}
 📊 **最新美股交易日**: ETF资金流 {etf_display_str} | SOPR 28MA = {s_sopr:.4f}
 Hyperliquid 当前无持仓，等待下一个开仓信号。
-"""
+{ahr_str}"""
             send_telegram_message(msg)
 
 if __name__ == '__main__':
