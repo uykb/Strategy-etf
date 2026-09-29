@@ -372,132 +372,132 @@ def run_daily_bot():
         pos_state = state["pos_state"]
         entry_p = state["entry_price"]
 
+    # === 获取当日新信号 ===
+    high_vol = s_vol20 > vol_75th
+    if s_sopr > 1.005: sopr_state = "bull"
+    elif s_sopr < 0.995: sopr_state = "bear"
+    else: sopr_state = "neutral"
+    
+    if s_flow == 0:
+        sig_type, action_str, pos_rec_str = "ZERO_FLOW", "维持现有仓位不变", "不变"
+    elif s_flow > 0:
+        if sopr_state == "bull":
+            sig_type, action_str, pos_rec_str = "LONG_STRONG", "做多现货/永续", ("40% (高波动率压缩)" if high_vol else "60%-80% (建议70%)")
+        elif sopr_state == "neutral":
+            sig_type, action_str, pos_rec_str = "LONG_WEAK", "轻仓做多", ("30%-40% (高波动率压缩)" if high_vol else "30%-50%")
+        else:
+            sig_type, action_str, pos_rec_str = "CONFLICT", "观望/极轻仓", "≤20%"
+    else:
+        if sopr_state == "bear":
+            sig_type, action_str, pos_rec_str = "SHORT_STRONG", "做空 (2倍永续)", ("名义40% 保证金20% (高波动率压缩)" if high_vol else "名义40%-50% 保证金20%-25%")
+        elif sopr_state == "neutral":
+            sig_type, action_str, pos_rec_str = "SHORT_WEAK", "轻仓做空 (2倍永续)", ("名义30%-40% 保证金15%-20% (高波动率压缩)" if high_vol else "名义30%-50% 保证金15%-25%")
+        else:
+            sig_type, action_str, pos_rec_str = "CONFLICT", "观望/极轻仓", "≤20%"
+
     # -------------------------------------------------------------
-    # 场景 1: 当前有持仓 (LONG 或 SHORT) -> 检查 1.5x SL 或 3.5x TP
+    # 场景 1: 当前有持仓 (LONG 或 SHORT) -> 检查止损/止盈/信号反转/矛盾
     # -------------------------------------------------------------
     if pos_state != 0:
-        if pos_state > 0: # 多头
-            sl_p = entry_p - 1.5 * s_atr
-            tp_p = entry_p + 3.5 * s_atr
-            exited = False
-            exit_reason = ""
+        is_long = pos_state > 0
+        sl_p = entry_p - 1.5 * s_atr if is_long else entry_p + 1.5 * s_atr
+        tp_p = entry_p + 3.5 * s_atr if is_long else entry_p - 3.5 * s_atr
+        
+        exited = False
+        exit_reason = ""
+        
+        # 1. ATR 追踪止损/止盈 (触发立即平仓)
+        if is_long:
+            if low_today <= sl_p: exited, exit_reason = True, "🚨 **Hyperliquid 多头已触发 1.5x ATR 止损！建议立即平仓**"
+            elif high_today >= tp_p: exited, exit_reason = True, "🎉 **Hyperliquid 多头已触发 3.5x ATR 止盈！建议立即平仓**"
+        else:
+            if high_today >= sl_p: exited, exit_reason = True, "🚨 **Hyperliquid 空头已触发 1.5x ATR 止损！建议立即平仓**"
+            elif low_today <= tp_p: exited, exit_reason = True, "🎉 **Hyperliquid 空头已触发 3.5x ATR 止盈！建议立即平仓**"
             
-            if low_today <= sl_p:
-                exited = True
-                exit_reason = "🚨 **Hyperliquid 多头持仓已触发 1.5x ATR 止损警告！建议手动平仓**"
-            elif high_today >= tp_p:
-                exited = True
-                exit_reason = "🎉 **Hyperliquid 多头持仓已触发 3.5x ATR 止盈警告！建议手动平仓**"
-
-            if exited:
-                msg = f"""{exit_reason}
+        if exited:
+            msg = f"""{exit_reason}
 📅 **日       期**: {dt_today}
 ⚡ **链上平台**: Hyperliquid
-📈 **方       向**: 多头 (LONG)
+📈 **方       向**: {"多头 (LONG)" if is_long else "空头 (SHORT)"}
 💵 **开仓参考价**: ${entry_p:,.2f}
 当前 BTC 价格: ${close_today:,.2f}
 🛑 **止损触发价**: ${sl_p:,.2f}
 🎯 **止盈触发价**: ${tp_p:,.2f}
 {ahr_str}"""
-                send_telegram_message(msg)
-                state["pos_state"] = 0; save_state(state)
-                return
+            send_telegram_message(msg)
+            if not hl_pos: state["pos_state"] = 0; save_state(state)
+            return
 
-        elif pos_state < 0: # 空头
-            sl_p = entry_p + 1.5 * s_atr
-            tp_p = entry_p - 3.5 * s_atr
-            exited = False
-            exit_reason = ""
+        # 2. 未触碰止盈止损，检查信号状态 (反转/矛盾/维持)
+        pos_str = "多头 (LONG)" if is_long else "空头 (SHORT)"
+        hl_info_str = f"⚡ **Hyperliquid 真实持仓**: {hl_pos['szi']} BTC (未实现盈亏: ${hl_pos['unrealized_pnl']:+,.2f})\n" if hl_pos else ""
+        dist_sl = abs(close_today - sl_p) / close_today * 100
+        dist_tp = abs(close_today - tp_p) / close_today * 100
+        
+        if sig_type == "ZERO_FLOW":
+            notice = "✅ 零流入日：不主动平仓，维持现有仓位与止损。"
+        elif sig_type == "CONFLICT":
+            notice = "⚠️ **信号矛盾**：建议减仓至 ≤20% 或清仓！"
+        elif (is_long and "SHORT" in sig_type) or (not is_long and "LONG" in sig_type):
+            notice = f"🚨 **信号发生反转**：建议先平掉旧{pos_str}，并反手 {action_str}！"
+        else:
+            notice = f"✅ 信号同向 ({sig_type})：继续持有，注意止损。"
             
-            if high_today >= sl_p:
-                exited = True
-                exit_reason = "🚨 **Hyperliquid 空头持仓已触发 1.5x ATR 止损警告！建议手动平仓**"
-            elif low_today <= tp_p:
-                exited = True
-                exit_reason = "🎉 **Hyperliquid 空头持仓已触发 3.5x ATR 止盈警告！建议手动平仓**"
-
-            if exited:
-                msg = f"""{exit_reason}
-📅 **日       期**: {dt_today}
-⚡ **链上平台**: Hyperliquid
-📉 **方       向**: 空头 (SHORT)
-💵 **开仓参考价**: ${entry_p:,.2f}
-当前 BTC 价格: ${close_today:,.2f}
-🛑 **止损触发价**: ${sl_p:,.2f}
-🎯 **止盈触发价**: ${tp_p:,.2f}
-{ahr_str}"""
-                send_telegram_message(msg)
-                state["pos_state"] = 0; save_state(state)
-                return
-
-        # 若未触发止盈止损，发送每日 Hyperliquid 真实持仓监控通知
-        if not exited:
-            dist_sl = abs(close_today - sl_p) / close_today * 100
-            dist_tp = abs(close_today - tp_p) / close_today * 100
-            pos_str = "多头 (LONG)" if pos_state > 0 else "空头 (SHORT)"
-            
-            hl_info_str = ""
-            if hl_pos:
-                hl_info_str = f"⚡ **Hyperliquid 真实持仓**: {hl_pos['szi']} BTC (未实现盈亏: ${hl_pos['unrealized_pnl']:+,.2f})\n"
-                
-            msg = f"""📊 **Hyperliquid 链上持仓日常监控**
+        msg = f"""📊 **Hyperliquid 链上持仓日常监控**
 📅 **日       期**: {dt_today}
 🔒 **当前状态**: 持有 {pos_str}
 {hl_info_str}💵 **建仓参考价**: ${entry_p:,.2f}
 当前 BTC 价格: ${close_today:,.2f}
 🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f} (距止损 {dist_sl:.2f}%)
 🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f} (距止盈 {dist_tp:.2f}%)
+📝 **操作建议**: {notice}
 {ahr_str}"""
-            send_telegram_message(msg)
-            return
+        send_telegram_message(msg)
+        return
 
     # -------------------------------------------------------------
-    # 场景 2: 当前无持仓 (FLAT) -> 检查开仓信号并提示去 Hyperliquid 建仓
+    # 场景 2: 当前无持仓 (FLAT) -> 检查开仓信号
     # -------------------------------------------------------------
     if pos_state == 0:
-        if s_flow > 0 and s_sopr > 1.0: # 触发做多
-            pos_w = 0.40 if s_vol20 > vol_75th else 0.70
-            entry_p = open_today
+        entry_p = open_today
+        if "LONG" in sig_type:
             sl_p = entry_p - 1.5 * s_atr
             tp_p = entry_p + 3.5 * s_atr
+            if not hl_pos: state["pos_state"] = 1; state["entry_price"] = entry_p; state["sl_price"] = sl_p; state["tp_price"] = tp_p; save_state(state)
             
-            state["pos_state"] = 1; state["entry_price"] = entry_p; state["sl_price"] = sl_p; state["tp_price"] = tp_p; save_state(state)
-            
-            msg = f"""🚀 **BTC ETF + SOPR 开仓信号提醒 (LONG)**
+            msg = f"""🚀 **BTC ETF + SOPR 开仓信号 ({sig_type})**
 📅 **日       期**: {dt_today}
-⚡ **建议行动**: **多头仓位**
-📈 **推荐仓位**: 现货/永续 {pos_w*100:.0f}%
+⚡ **建议行动**: **{action_str}**
+📈 **推荐仓位**: {pos_rec_str}
 💵 **建仓参考价**: ${entry_p:,.2f}
 🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
 🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
 📊 **前日信号**: ETF {etf_display_str} | SOPR={s_sopr:.4f}
 {ahr_str}"""
             send_telegram_message(msg)
-
-        elif s_flow < 0 and s_sopr < 1.0: # 触发做空
-            pos_w = -0.40 if s_vol20 > vol_75th else -0.45
-            entry_p = open_today
+            
+        elif "SHORT" in sig_type:
             sl_p = entry_p + 1.5 * s_atr
             tp_p = entry_p - 3.5 * s_atr
+            if not hl_pos: state["pos_state"] = -1; state["entry_price"] = entry_p; state["sl_price"] = sl_p; state["tp_price"] = tp_p; save_state(state)
             
-            state["pos_state"] = -1; state["entry_price"] = entry_p; state["sl_price"] = sl_p; state["tp_price"] = tp_p; save_state(state)
-            
-            msg = f"""📉 **BTC ETF + SOPR 开仓信号提醒 (SHORT)**
+            msg = f"""📉 **BTC ETF + SOPR 开仓信号 ({sig_type})**
 📅 **日       期**: {dt_today}
-⚡ **建议行动**: **2倍永续空单**
-📉 **推荐仓位**: 名义空头 {pos_w*100:.0f}%
+⚡ **建议行动**: **{action_str}**
+📉 **推荐仓位**: {pos_rec_str}
 💵 **建仓参考价**: ${entry_p:,.2f}
 🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
 🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
 📊 **前日信号**: ETF {etf_display_str} | SOPR={s_sopr:.4f}
 {ahr_str}"""
             send_telegram_message(msg)
-
+            
         else:
             msg = f"""💤 **Hyperliquid 策略今日观望 (FLAT)**
 📅 **日       期**: {dt_today}
 📊 **最新美股交易日**: ETF {etf_display_str} | SOPR 28MA = {s_sopr:.4f}
-当前无持仓，等待下一个开仓信号。
+当前无持仓，等待下一个明确开仓信号。
+📝 **操作建议**: {action_str} ({pos_rec_str})
 {ahr_str}"""
             send_telegram_message(msg)
 
