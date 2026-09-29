@@ -88,10 +88,11 @@ def fetch_btc_data():
     return df[['date', 'open', 'high', 'low', 'close', 'volume']].sort_values('date').reset_index(drop=True)
 
 def fetch_farside_etf_data():
-    """获取 Farside 比特币 ETF 每日净流入数据 (拟真 Chrome 指纹绕过 Cloudflare)"""
+    """获取 Farside 比特币 ETF 每日净流入数据 (多表格扫描 + 全拟真 Chrome 指纹)"""
     urls = [
         'https://farside.co.uk/bitcoin-etf-flow-all-data/',
-        'https://farside.co.uk/btc/'
+        'https://farside.co.uk/btc/',
+        'https://farside.co.uk/us-btc-etf-flow-data/'
     ]
     
     headers = {
@@ -109,46 +110,61 @@ def fetch_farside_etf_data():
     }
     
     parsed = []
-    html_text = ""
     
+    # 1. 优先使用 curl_cffi
     try:
         from curl_cffi import requests as c_requests
         for url in urls:
             try:
                 res = c_requests.get(url, headers=headers, impersonate='chrome120', timeout=15)
                 if res.status_code == 200:
-                    html_text = res.text
-                    print(f"Successfully fetched Farside via curl_cffi from {url}")
-                    break
+                    soup = BeautifulSoup(res.text, 'html.parser')
+                    tables = soup.find_all('table')
+                    for table in tables:
+                        for r in table.find_all('tr'):
+                            cols = [c.get_text(strip=True) for c in r.find_all(['td', 'th'])]
+                            if len(cols) >= 2 and re.search(r'\d{1,2}\s+[A-Za-z]{3}\s+\d{4}', cols[0]):
+                                val_col = cols[-1] if cols[-1] not in ['', '-'] else (cols[-2] if len(cols) > 2 else '0')
+                                val_str = val_col.replace('$', '').replace(',', '').strip()
+                                try:
+                                    val = -float(val_str[1:-1]) if val_str.startswith('(') and val_str.endswith(')') else (float(val_str) if val_str not in ['-', '', 'NaN'] else 0.0)
+                                    parsed.append({'date_str': cols[0], 'etf_flow': val})
+                                except ValueError:
+                                    pass
+                    if len(parsed) > 0:
+                        print(f"Successfully fetched & parsed {len(parsed)} ETF flow rows via curl_cffi from {url}")
+                        break
             except Exception as e:
                 print(f"curl_cffi fetch {url} failed: {e}")
     except ImportError:
-        print("curl_cffi not installed, using standard requests.")
+        print("curl_cffi not installed, falling back to standard requests.")
 
-    if not html_text:
+    # 2. 降级备用 requests
+    if len(parsed) == 0:
         for url in urls:
             try:
                 res = requests.get(url, headers=headers, timeout=15)
                 if res.status_code == 200:
-                    html_text = res.text
-                    print(f"Successfully fetched Farside via requests from {url}")
-                    break
+                    soup = BeautifulSoup(res.text, 'html.parser')
+                    for table in soup.find_all('table'):
+                        for r in table.find_all('tr'):
+                            cols = [c.get_text(strip=True) for c in r.find_all(['td', 'th'])]
+                            if len(cols) >= 2 and re.search(r'\d{1,2}\s+[A-Za-z]{3}\s+\d{4}', cols[0]):
+                                val_col = cols[-1] if cols[-1] not in ['', '-'] else (cols[-2] if len(cols) > 2 else '0')
+                                val_str = val_col.replace('$', '').replace(',', '').strip()
+                                try:
+                                    val = -float(val_str[1:-1]) if val_str.startswith('(') and val_str.endswith(')') else (float(val_str) if val_str not in ['-', '', 'NaN'] else 0.0)
+                                    parsed.append({'date_str': cols[0], 'etf_flow': val})
+                                except ValueError:
+                                    pass
+                    if len(parsed) > 0:
+                        print(f"Successfully fetched & parsed {len(parsed)} ETF flow rows via requests from {url}")
+                        break
             except Exception as e:
                 print(f"requests fetch {url} failed: {e}")
 
-    if html_text:
-        soup = BeautifulSoup(html_text, 'html.parser')
-        tables = soup.find_all('table')
-        if len(tables) > 0:
-            for r in tables[0].find_all('tr'):
-                cols = [c.get_text(strip=True) for c in r.find_all(['td', 'th'])]
-                if len(cols) >= 2 and re.search(r'\d{1,2}\s+[A-Za-z]{3}\s+\d{4}', cols[0]):
-                    val_str = cols[-1].replace('$', '').replace(',', '').strip()
-                    val = -float(val_str[1:-1]) if val_str.startswith('(') and val_str.endswith(')') else (float(val_str) if val_str not in ['-', '', 'NaN'] else 0.0)
-                    parsed.append({'date_str': cols[0], 'etf_flow': val})
-
     if len(parsed) == 0:
-        print("Warning: Farside parsing yielded 0 rows due to cloud block. Returning empty fallback.")
+        print("Warning: Farside parsing yielded 0 rows. Returning empty fallback dataframe.")
         return pd.DataFrame(columns=['date', 'etf_flow'])
 
     df_etf = pd.DataFrame(parsed)
@@ -195,7 +211,7 @@ def fetch_hyperliquid_position(wallet_address: str):
         return None
 
 def load_state():
-    """读取本地备份持仓状态"""
+    """读取持仓状态"""
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -210,7 +226,7 @@ def load_state():
     }
 
 def save_state(state):
-    """保存本地持仓状态"""
+    """保存持仓状态"""
     with open(STATE_FILE, 'w', encoding='utf-8') as f:
         json.dump(state, f, indent=4, ensure_ascii=False)
 
@@ -219,10 +235,9 @@ def run_daily_bot():
     df_btc = fetch_btc_data()
     df_etf = fetch_farside_etf_data()
     
-    # 修复 ETF 数据的合并与 Forward Fill (前向填充休市日/尚未发布日)
+    # 避免周末与发布延迟导致 fillna(0.0) 抹零，改用 ffill()
     df = pd.merge(df_btc, df_etf, on='date', how='left')
-    df['etf_flow_raw'] = df['etf_flow'] # 保存未填充的原始流动
-    df['etf_flow'] = df['etf_flow'].ffill().fillna(0.0) # 前向填充上一个美组交易日的流入量
+    df['etf_flow'] = df['etf_flow'].ffill().fillna(0.0)
     
     # 指标计算
     prev_close = df['close'].shift(1)
@@ -241,14 +256,14 @@ def run_daily_bot():
     low_today = row_today['low']
     open_today = row_today['open']
     
-    # 获取美股最新的实际 ETF 数据行与日期
+    # 提取美股最新交易日的具体数值与日期
     if not df_etf.empty:
         latest_etf_row = df_etf.iloc[-1]
         latest_etf_date = latest_etf_row['date'].strftime('%m-%d')
         latest_etf_val = latest_etf_row['etf_flow']
         etf_display_str = f"${latest_etf_val:+.1f}M ({latest_etf_date})"
     else:
-        etf_display_str = f"${row_prev['etf_flow']:+.1f}M"
+        etf_display_str = f"${row_prev['etf_flow']:+.1f}M (数据暂缺)"
         
     s_flow = row_prev['etf_flow']
     s_sopr = row_prev['sopr_28ma']
@@ -256,7 +271,7 @@ def run_daily_bot():
     s_vol20 = row_prev['vol_20']
     vol_75th = df['vol_20'].tail(60).quantile(0.75)
     
-    # 优先使用 Hyperliquid 链上实时钱包持仓
+    # 优先使用 Hyperliquid 链上真实钱包持仓
     hl_pos = None
     if HYPERLIQUID_WALLET:
         print(f"正在查询 Hyperliquid 钱包地址真实持仓: {HYPERLIQUID_WALLET[:6]}...{HYPERLIQUID_WALLET[-4:]}")
@@ -266,7 +281,7 @@ def run_daily_bot():
 
     state = load_state()
     
-    # 确定当前系统的生效状态
+    # 确定生效状态
     if hl_pos:
         pos_state = 1 if hl_pos['side'] == 'LONG' else (-1 if hl_pos['side'] == 'SHORT' else 0)
         entry_p = hl_pos['entry_price'] if pos_state != 0 else 0.0
