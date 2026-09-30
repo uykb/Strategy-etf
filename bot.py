@@ -379,19 +379,19 @@ def run_daily_bot():
     else: sopr_state = "neutral"
     
     if s_flow == 0:
-        sig_type, action_str, pos_rec_str = "ZERO_FLOW", "维持现有仓位不变", "不变"
+        sig_type, action_str, pos_rec_str = "ZERO FLOW", "维持现有仓位不变", "不变"
     elif s_flow > 0:
         if sopr_state == "bull":
-            sig_type, action_str, pos_rec_str = "LONG_STRONG", "做多现货/永续", ("40% (高波动率压缩)" if high_vol else "60%-80% (建议70%)")
+            sig_type, action_str, pos_rec_str = "LONG STRONG", "做多现货/永续", ("40% (高波动率压缩)" if high_vol else "60%-80% (建议70%)")
         elif sopr_state == "neutral":
-            sig_type, action_str, pos_rec_str = "LONG_WEAK", "轻仓做多", ("30%-40% (高波动率压缩)" if high_vol else "30%-50%")
+            sig_type, action_str, pos_rec_str = "LONG WEAK", "轻仓做多", ("30%-40% (高波动率压缩)" if high_vol else "30%-50%")
         else:
             sig_type, action_str, pos_rec_str = "CONFLICT", "观望/极轻仓", "≤20%"
     else:
         if sopr_state == "bear":
-            sig_type, action_str, pos_rec_str = "SHORT_STRONG", "做空 (2倍永续)", ("名义40% 保证金20% (高波动率压缩)" if high_vol else "名义40%-50% 保证金20%-25%")
+            sig_type, action_str, pos_rec_str = "SHORT STRONG", "做空 (2倍永续)", ("名义40% 保证金20% (高波动率压缩)" if high_vol else "名义40%-50% 保证金20%-25%")
         elif sopr_state == "neutral":
-            sig_type, action_str, pos_rec_str = "SHORT_WEAK", "轻仓做空 (2倍永续)", ("名义30%-40% 保证金15%-20% (高波动率压缩)" if high_vol else "名义30%-50% 保证金15%-25%")
+            sig_type, action_str, pos_rec_str = "SHORT WEAK", "轻仓做空 (2倍永续)", ("名义30%-40% 保证金15%-20% (高波动率压缩)" if high_vol else "名义30%-50% 保证金15%-25%")
         else:
             sig_type, action_str, pos_rec_str = "CONFLICT", "观望/极轻仓", "≤20%"
 
