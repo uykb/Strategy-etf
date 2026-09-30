@@ -32,7 +32,7 @@ jobs:
 
       - name: Start Clash Proxy
         run: |
-          wget -q https://github.com/Dreamacro/clash/releases/download/v1.18.0/clash-linux-amd64-v1.18.0.gz -O clash.gz
+          wget -q https://github.com/MetaCubeX/mihomo/releases/download/v1.18.2/mihomo-linux-amd64-v1.18.2.gz -O clash.gz
           gzip -d clash.gz
           chmod +x clash
           cat << 'EOF' > config.yaml
