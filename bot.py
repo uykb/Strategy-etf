@@ -114,9 +114,12 @@ def fetch_farside_etf_data():
     # 1. 优先使用 curl_cffi
     try:
         from curl_cffi import requests as c_requests
+        proxy_url = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        
         for url in urls:
             try:
-                res = c_requests.get(url, headers=headers, impersonate='chrome120', timeout=15)
+                res = c_requests.get(url, headers=headers, impersonate='chrome120', timeout=15, proxies=proxies)
                 if res.status_code == 200:
                     soup = BeautifulSoup(res.text, 'html.parser')
                     tables = soup.find_all('table')
