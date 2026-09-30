@@ -2,10 +2,10 @@ name: BTC ETF Strategy Daily Telegram Bot
 
 on:
   schedule:
-    # cron 1: 北京时间 10:30 AM (UTC 02:30) 自动运行，此时Farside绝大部分数据已更新
-    - cron: '30 2 * * *'
-    # cron 2: 北京时间 12:00 PM (UTC 04:00) 补充轮询，确保所有数据(如贝莱德IBIT)完全入库
-    - cron: '0 4 * * 1-5'
+    # cron 1: 北京时间 09:00 AM (UTC 01:00) 自动运行
+    - cron: '0 1 * * *'
+    # cron 2: 北京时间 09:30 AM (UTC 01:30) 补充轮询
+    - cron: '30 1 * * 1-5'
   workflow_dispatch: # 支持在 GitHub 网页界面随时手动点击运行测试
 
 jobs:
