@@ -30,11 +30,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Start Clash Proxy
+        run: |
+          wget -q https://github.com/Dreamacro/clash/releases/download/v1.18.0/clash-linux-amd64-v1.18.0.gz -O clash.gz
+          gzip -d clash.gz
+          chmod +x clash
+          cat << 'EOF' > config.yaml
+          mixed-port: 7890
+          allow-lan: true
+          mode: global
+          proxy-providers:
+            free-nodes:
+              type: http
+              url: "https://raw.githubusercontent.com/uykb/clash-proxy-cleaner/main/subscribe.yaml"
+              interval: 3600
+              path: ./free-nodes.yaml
+              health-check:
+                enable: true
+                interval: 600
+                url: http://www.gstatic.com/generate_204
+          proxy-groups:
+            - name: GLOBAL
+              type: url-test
+              proxies: []
+              use:
+                - free-nodes
+              url: 'http://www.gstatic.com/generate_204'
+              interval: 300
+          EOF
+          ./clash -d . -f config.yaml > clash.log 2>&1 &
+          echo "Waiting for Clash to download nodes and start..."
+          sleep 15
+          curl -s -x http://127.0.0.1:7890 http://www.gstatic.com/generate_204 || echo "Proxy check failed"
+
       - name: Run Daily Strategy Bot
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           HYPERLIQUID_WALLET: ${{ secrets.HYPERLIQUID_WALLET }}
+          HTTP_PROXY: http://127.0.0.1:7890
+          HTTPS_PROXY: http://127.0.0.1:7890
         run: |
           python bot.py
 
