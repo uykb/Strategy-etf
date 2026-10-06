@@ -345,6 +345,32 @@ def format_ahr999_message(ahr_info):
         f"💰 **定投成本**: `${ahr_info['gm200']:,.2f}`"
     )
 
+def get_etf_streak(df_etf):
+    """
+    统计最新连续净流入或净流出天数（跳过零值日，>=2 天才返回，否则返回 None）
+    """
+    if df_etf is None or df_etf.empty:
+        return None
+    # 过滤掉流量为 0 的日期（周末/无数据日）
+    flows = df_etf[df_etf['etf_flow'] != 0]['etf_flow'].values
+    if len(flows) == 0:
+        return None
+    last_sign = 1 if flows[-1] > 0 else -1
+    streak = 1
+    total = float(flows[-1])
+    for i in range(len(flows) - 2, -1, -1):
+        sign = 1 if flows[i] > 0 else -1
+        if sign == last_sign:
+            streak += 1
+            total += float(flows[i])
+        else:
+            break
+    if streak < 2:
+        return None
+    direction = "净流入" if last_sign > 0 else "净流出"
+    emoji = "🟢" if last_sign > 0 else "🔴"
+    return {"streak": streak, "direction": direction, "total": total, "emoji": emoji}
+
 def run_daily_bot():
     print("=== 开始运行 BTC ETF + SOPR 每日策略机器人 ===")
     df_btc = fetch_btc_data()
@@ -394,7 +420,15 @@ def run_daily_bot():
     s_atr = row_prev['atr_14']
     s_vol20 = row_prev['vol_20']
     vol_75th = df['vol_20'].tail(60).quantile(0.75)
-    
+
+    # ETF 连续流入/流出统计 (>=2 天才展示)
+    streak_info = get_etf_streak(df_etf)
+    streak_str = (
+        f"{streak_info['emoji']} **ETF 连续{streak_info['direction']}**: "
+        f"`{streak_info['streak']}` 天 (累计 `${streak_info['total']:+.1f}M`)"
+    ) if streak_info else ""
+
+
     # 优先使用 Hyperliquid 链上真实钱包持仓
     hl_pos = None
     if HYPERLIQUID_WALLET:
@@ -464,6 +498,7 @@ def run_daily_bot():
 当前 BTC 价格: ${close_today:,.2f}
 🛑 **止损触发价**: ${sl_p:,.2f}
 🎯 **止盈触发价**: ${tp_p:,.2f}
+{streak_str}
 {fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
@@ -493,6 +528,7 @@ def run_daily_bot():
 🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f} (距止损 {dist_sl:.2f}%)
 🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f} (距止盈 {dist_tp:.2f}%)
 📝 **操作建议**: {notice}
+{streak_str}
 {fng_str}
 {ahr_str}"""
         send_telegram_message(msg)
@@ -516,6 +552,7 @@ def run_daily_bot():
 🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
 🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
 📊 **前日信号**: ETF {etf_display_str} | SOPR={s_sopr:.4f}
+{streak_str}
 {fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
@@ -533,6 +570,7 @@ def run_daily_bot():
 🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
 🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
 📊 **前日信号**: ETF {etf_display_str} | SOPR={s_sopr:.4f}
+{streak_str}
 {fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
@@ -541,11 +579,13 @@ def run_daily_bot():
             msg = f"""💤 **Hyperliquid 策略今日观望 (FLAT)**
 📅 **日       期**: {dt_today}
 📊 **最新美股交易日**: ETF {etf_display_str} | SOPR 28MA = {s_sopr:.4f}
+{streak_str}
 当前无持仓，等待下一个明确开仓信号。
 📝 **操作建议**: {action_str} ({pos_rec_str})
 {fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
+
 
 
 if __name__ == '__main__':
