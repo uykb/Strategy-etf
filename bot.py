@@ -236,6 +236,39 @@ def fetch_hyperliquid_position(wallet_address: str):
         print(f"Exception fetching Hyperliquid position: {e}")
         return None
 
+def fetch_fear_greed_index():
+    """获取 Alternative.me 比特币恐惧贪婪指数 (0=极度恐惧, 100=极度贪婪)"""
+    try:
+        res = requests.get("https://api.alternative.me/fng/?limit=1", timeout=10)
+        if res.status_code == 200:
+            data = res.json().get("data", [{}])[0]
+            value = int(data.get("value", -1))
+            label = data.get("value_classification", "N/A")
+            # 映射英文标签为中文
+            label_map = {
+                "Extreme Fear": "极度恐惧",
+                "Fear": "恐惧",
+                "Neutral": "中性",
+                "Greed": "贪婪",
+                "Extreme Greed": "极度贪婪",
+            }
+            label_cn = label_map.get(label, label)
+            # 选择对应 emoji
+            if value <= 25:
+                emoji = "😱"
+            elif value <= 45:
+                emoji = "😨"
+            elif value <= 55:
+                emoji = "😐"
+            elif value <= 75:
+                emoji = "😏"
+            else:
+                emoji = "🤑"
+            return {"value": value, "label": label_cn, "emoji": emoji}
+    except Exception as e:
+        print(f"Failed to fetch Fear & Greed Index: {e}")
+    return None
+
 def load_state():
     """读取持仓状态"""
     if os.path.exists(STATE_FILE):
@@ -320,6 +353,11 @@ def run_daily_bot():
     # 计算 AHR999 囤币指标 (仅供推送，不参与策略决策)
     ahr_info = calculate_ahr999(df_btc)
     ahr_str = format_ahr999_message(ahr_info)
+
+    # 获取恐惧贪婪指数
+    fng = fetch_fear_greed_index()
+    fng_str = f"🧭 **恐惧贪婪指数**: {fng['emoji']} `{fng['value']}` ({fng['label']})" if fng else ""
+
     
     # 避免周末与发布延迟导致 fillna(0.0) 抹零，改用 ffill()
     df = pd.merge(df_btc, df_etf, on='date', how='left')
@@ -426,6 +464,7 @@ def run_daily_bot():
 当前 BTC 价格: ${close_today:,.2f}
 🛑 **止损触发价**: ${sl_p:,.2f}
 🎯 **止盈触发价**: ${tp_p:,.2f}
+{fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
             if not hl_pos: state["pos_state"] = 0; save_state(state)
@@ -454,6 +493,7 @@ def run_daily_bot():
 🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f} (距止损 {dist_sl:.2f}%)
 🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f} (距止盈 {dist_tp:.2f}%)
 📝 **操作建议**: {notice}
+{fng_str}
 {ahr_str}"""
         send_telegram_message(msg)
         return
@@ -476,6 +516,7 @@ def run_daily_bot():
 🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
 🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
 📊 **前日信号**: ETF {etf_display_str} | SOPR={s_sopr:.4f}
+{fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
             
@@ -492,6 +533,7 @@ def run_daily_bot():
 🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
 🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
 📊 **前日信号**: ETF {etf_display_str} | SOPR={s_sopr:.4f}
+{fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
             
@@ -501,8 +543,10 @@ def run_daily_bot():
 📊 **最新美股交易日**: ETF {etf_display_str} | SOPR 28MA = {s_sopr:.4f}
 当前无持仓，等待下一个明确开仓信号。
 📝 **操作建议**: {action_str} ({pos_rec_str})
+{fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
+
 
 if __name__ == '__main__':
     run_daily_bot()
