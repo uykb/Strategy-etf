@@ -492,13 +492,13 @@ def run_daily_bot():
         if exited:
             msg = f"""{exit_reason}
 📅 `{dt_today}`  {'多头 (LONG)' if is_long else '空头 (SHORT)'}
-─────────────────────
+
 *💵 价格记录*
 • 建仓参考价:  `${entry_p:,.2f}`
 • 当前价格:    `${close_today:,.2f}`
 • 止损触发价: `${sl_p:,.2f}`
 • 止盈目标价: `${tp_p:,.2f}`
-─────────────────────
+
 {streak_str}
 {fng_str}
 {ahr_str}"""
@@ -523,18 +523,18 @@ def run_daily_bot():
             
         msg = f"""📊 *Hyperliquid 持仓监控*
 📅 `{dt_today}`  🔒 持有 *{pos_str}*
-─────────────────────
+
 *💼 持仓详情*
 {hl_info_str}• 建仓参考价: `${entry_p:,.2f}`
 • 当前价格:   `${close_today:,.2f}`
-─────────────────────
+
 *🎯 止损 / 止盈*
 • 止损 -1.5x ATR: `${sl_p:,.2f}`  距离 `{dist_sl:.2f}%`
 • 止盈 +3.5x ATR: `${tp_p:,.2f}`  距离 `{dist_tp:.2f}%`
-─────────────────────
+
 *📝 操作建议*
 {notice}
-─────────────────────
+
 {streak_str}
 {fng_str}
 {ahr_str}"""
@@ -553,18 +553,17 @@ def run_daily_bot():
             
             msg = f"""🚀 *BTC ETF + SOPR 开仓信号*
 ⚡ `{sig_type}`  📅 `{dt_today}`
-─────────────────────
+
 *📈 操作方案*
 • 建议行动: *{action_str}*
 • 推荐仓位: `{pos_rec_str}`
 • 建仓参考价:        `${entry_p:,.2f}`
 • 止损 -1.5x ATR: `${sl_p:,.2f}`
 • 止盈 +3.5x ATR: `${tp_p:,.2f}`
-─────────────────────
+
 *📊 市场信号*
 • ETF: `{etf_display_str}`  SOPR: `{s_sopr:.4f}`
 {streak_str}
-─────────────────────
 {fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
@@ -576,18 +575,17 @@ def run_daily_bot():
             
             msg = f"""📉 *BTC ETF + SOPR 开仓信号*
 ⚡ `{sig_type}`  📅 `{dt_today}`
-─────────────────────
+
 *📉 操作方案*
 • 建议行动: *{action_str}*
 • 推荐仓位: `{pos_rec_str}`
 • 建仓参考价:        `${entry_p:,.2f}`
 • 止损 -1.5x ATR: `${sl_p:,.2f}`
 • 止盈 +3.5x ATR: `${tp_p:,.2f}`
-─────────────────────
+
 *📊 市场信号*
 • ETF: `{etf_display_str}`  SOPR: `{s_sopr:.4f}`
 {streak_str}
-─────────────────────
 {fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
@@ -595,16 +593,15 @@ def run_daily_bot():
         else:
             msg = f"""💤 *Hyperliquid 策略今日观望*
 📅 `{dt_today}`
-─────────────────────
+
 *📊 市场信号*
 • ETF: `{etf_display_str}`
 • SOPR 28MA: `{s_sopr:.4f}`
 {streak_str}
-─────────────────────
 *📝 操作建议*
 当前无持仓，等待明确开仓信号。
 {action_str}  `({pos_rec_str})`
-─────────────────────
+
 {fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
