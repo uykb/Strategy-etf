@@ -1,11 +1,6 @@
 name: BTC ETF Strategy Daily Telegram Bot
 
 on:
-  schedule:
-    # cron 1: 北京时间 09:11 AM (UTC 01:11) 自动运行 (使用奇数分钟避开 GitHub 整点拥堵)
-    - cron: '11 1 * * *'
-    # cron 2: 北京时间 09:43 AM (UTC 01:43) 补充轮询 (使用奇数分钟避开 GitHub 半点拥堵)
-    - cron: '43 1 * * 1-5'
   workflow_dispatch: # 支持在 GitHub 网页界面随时手动点击运行测试
   repository_dispatch:
     types: [trigger-daily-bot] # 支持通过外部稳定 Cron 服务（如 cron-job.org）精确触发
