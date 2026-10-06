@@ -341,8 +341,8 @@ def format_ahr999_message(ahr_info):
     if not ahr_info:
         return ""
     return (
-        f"💡  **AHR999**: `{ahr_info['ahr_2026']:.4f}` | {ahr_info['zone_2026']}\n"
-        f"💰 **定投成本**: `${ahr_info['gm200']:,.2f}`"
+        f"💡 *AHR999*: `{ahr_info['ahr_2026']:.4f}`  {ahr_info['zone_2026']}\n"
+        f"💰 *定投成本*: `${ahr_info['gm200']:,.2f}`"
     )
 
 def get_etf_streak(df_etf):
@@ -382,7 +382,7 @@ def run_daily_bot():
 
     # 获取恐惧贪婪指数
     fng = fetch_fear_greed_index()
-    fng_str = f"🧭 **恐惧贪婪指数**: {fng['emoji']} `{fng['value']}` ({fng['label']})" if fng else ""
+    fng_str = f"🧭 *恐惧贪婪*: {fng['emoji']} `{fng['value']}`  {fng['label']}" if fng else ""
 
     
     # 避免周末与发布延迟导致 fillna(0.0) 抹零，改用 ffill()
@@ -424,8 +424,8 @@ def run_daily_bot():
     # ETF 连续流入/流出统计 (>=2 天才展示)
     streak_info = get_etf_streak(df_etf)
     streak_str = (
-        f"{streak_info['emoji']} **ETF 连续{streak_info['direction']}**: "
-        f"`{streak_info['streak']}` 天 (累计 `${streak_info['total']:+.1f}M`)"
+        f"{streak_info['emoji']} *ETF 连续{streak_info['direction']}*: "
+        f"`{streak_info['streak']}` 天  累计 `${streak_info['total']:+.1f}M`"
     ) if streak_info else ""
 
 
@@ -483,21 +483,22 @@ def run_daily_bot():
         
         # 1. ATR 追踪止损/止盈 (触发立即平仓)
         if is_long:
-            if low_today <= sl_p: exited, exit_reason = True, "🚨 **Hyperliquid 多头已触发 1.5x ATR 止损！建议立即平仓**"
-            elif high_today >= tp_p: exited, exit_reason = True, "🎉 **Hyperliquid 多头已触发 3.5x ATR 止盈！建议立即平仓**"
+            if low_today <= sl_p: exited, exit_reason = True, "🚨 *Hyperliquid 多头已触发 1.5x ATR 止损！建议立即平仓*"
+            elif high_today >= tp_p: exited, exit_reason = True, "🎉 *Hyperliquid 多头已触发 3.5x ATR 止盈！建议立即平仓*"
         else:
-            if high_today >= sl_p: exited, exit_reason = True, "🚨 **Hyperliquid 空头已触发 1.5x ATR 止损！建议立即平仓**"
-            elif low_today <= tp_p: exited, exit_reason = True, "🎉 **Hyperliquid 空头已触发 3.5x ATR 止盈！建议立即平仓**"
+            if high_today >= sl_p: exited, exit_reason = True, "🚨 *Hyperliquid 空头已触发 1.5x ATR 止损！建议立即平仓*"
+            elif low_today <= tp_p: exited, exit_reason = True, "🎉 *Hyperliquid 空头已触发 3.5x ATR 止盈！建议立即平仓*"
             
         if exited:
             msg = f"""{exit_reason}
-📅 **日       期**: {dt_today}
-⚡ **链上平台**: Hyperliquid
-📈 **方       向**: {"多头 (LONG)" if is_long else "空头 (SHORT)"}
-💵 **开仓参考价**: ${entry_p:,.2f}
-当前 BTC 价格: ${close_today:,.2f}
-🛑 **止损触发价**: ${sl_p:,.2f}
-🎯 **止盈触发价**: ${tp_p:,.2f}
+📅 `{dt_today}`  {'多头 (LONG)' if is_long else '空头 (SHORT)'}
+─────────────────────
+*💵 价格记录*
+• 建仓参考价:  `${entry_p:,.2f}`
+• 当前价格:    `${close_today:,.2f}`
+• 止损触发价: `${sl_p:,.2f}`
+• 止盈目标价: `${tp_p:,.2f}`
+─────────────────────
 {streak_str}
 {fng_str}
 {ahr_str}"""
@@ -507,27 +508,33 @@ def run_daily_bot():
 
         # 2. 未触碰止盈止损，检查信号状态 (反转/矛盾/维持)
         pos_str = "多头 (LONG)" if is_long else "空头 (SHORT)"
-        hl_info_str = f"⚡ **Hyperliquid 真实持仓**: {hl_pos['szi']} BTC (未实现盈亏: ${hl_pos['unrealized_pnl']:+,.2f})\n" if hl_pos else ""
+        hl_info_str = f"• 真实持仓: `{hl_pos['szi']} BTC`  盈亏 `${hl_pos['unrealized_pnl']:+,.2f}`\n" if hl_pos else ""
         dist_sl = abs(close_today - sl_p) / close_today * 100
         dist_tp = abs(close_today - tp_p) / close_today * 100
         
         if sig_type == "ZERO_FLOW":
             notice = "✅ 零流入日：不主动平仓，维持现有仓位与止损。"
         elif sig_type == "CONFLICT":
-            notice = "⚠️ **信号矛盾**：建议减仓至 ≤20% 或清仓！"
+            notice = "⚠️ *信号矛盾*：建议减仓至 ≤20% 或清仓！"
         elif (is_long and "SHORT" in sig_type) or (not is_long and "LONG" in sig_type):
-            notice = f"🚨 **信号发生反转**：建议先平掉旧{pos_str}，并反手 {action_str}！"
+            notice = f"🚨 *信号发生反转*：建议先平掉旧{pos_str}，并反手 {action_str}！"
         else:
             notice = f"✅ 信号同向 ({sig_type})：继续持有，注意止损。"
             
-        msg = f"""📊 **Hyperliquid 链上持仓日常监控**
-📅 **日       期**: {dt_today}
-🔒 **当前状态**: 持有 {pos_str}
-{hl_info_str}💵 **建仓参考价**: ${entry_p:,.2f}
-当前 BTC 价格: ${close_today:,.2f}
-🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f} (距止损 {dist_sl:.2f}%)
-🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f} (距止盈 {dist_tp:.2f}%)
-📝 **操作建议**: {notice}
+        msg = f"""📊 *Hyperliquid 持仓监控*
+📅 `{dt_today}`  🔒 持有 *{pos_str}*
+─────────────────────
+*💼 持仓详情*
+{hl_info_str}• 建仓参考价: `${entry_p:,.2f}`
+• 当前价格:   `${close_today:,.2f}`
+─────────────────────
+*🎯 止损 / 止盈*
+• 止损 -1.5x ATR: `${sl_p:,.2f}`  距离 `{dist_sl:.2f}%`
+• 止盈 +3.5x ATR: `${tp_p:,.2f}`  距离 `{dist_tp:.2f}%`
+─────────────────────
+*📝 操作建议*
+{notice}
+─────────────────────
 {streak_str}
 {fng_str}
 {ahr_str}"""
@@ -544,15 +551,20 @@ def run_daily_bot():
             tp_p = entry_p + 3.5 * s_atr
             if not hl_pos: state["pos_state"] = 1; state["entry_price"] = entry_p; state["sl_price"] = sl_p; state["tp_price"] = tp_p; save_state(state)
             
-            msg = f"""🚀 **BTC ETF + SOPR 开仓信号 ({sig_type})**
-📅 **日       期**: {dt_today}
-⚡ **建议行动**: **{action_str}**
-📈 **推荐仓位**: {pos_rec_str}
-💵 **建仓参考价**: ${entry_p:,.2f}
-🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
-🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
-📊 **前日信号**: ETF {etf_display_str} | SOPR={s_sopr:.4f}
+            msg = f"""🚀 *BTC ETF + SOPR 开仓信号*
+⚡ `{sig_type}`  📅 `{dt_today}`
+─────────────────────
+*📈 操作方案*
+• 建议行动: *{action_str}*
+• 推荐仓位: `{pos_rec_str}`
+• 建仓参考价:        `${entry_p:,.2f}`
+• 止损 -1.5x ATR: `${sl_p:,.2f}`
+• 止盈 +3.5x ATR: `${tp_p:,.2f}`
+─────────────────────
+*📊 市场信号*
+• ETF: `{etf_display_str}`  SOPR: `{s_sopr:.4f}`
 {streak_str}
+─────────────────────
 {fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
@@ -562,26 +574,37 @@ def run_daily_bot():
             tp_p = entry_p - 3.5 * s_atr
             if not hl_pos: state["pos_state"] = -1; state["entry_price"] = entry_p; state["sl_price"] = sl_p; state["tp_price"] = tp_p; save_state(state)
             
-            msg = f"""📉 **BTC ETF + SOPR 开仓信号 ({sig_type})**
-📅 **日       期**: {dt_today}
-⚡ **建议行动**: **{action_str}**
-📉 **推荐仓位**: {pos_rec_str}
-💵 **建仓参考价**: ${entry_p:,.2f}
-🛑 **设置止损 (-1.5x ATR)**: ${sl_p:,.2f}
-🎯 **设置止盈 (+3.5x ATR)**: ${tp_p:,.2f}
-📊 **前日信号**: ETF {etf_display_str} | SOPR={s_sopr:.4f}
+            msg = f"""📉 *BTC ETF + SOPR 开仓信号*
+⚡ `{sig_type}`  📅 `{dt_today}`
+─────────────────────
+*📉 操作方案*
+• 建议行动: *{action_str}*
+• 推荐仓位: `{pos_rec_str}`
+• 建仓参考价:        `${entry_p:,.2f}`
+• 止损 -1.5x ATR: `${sl_p:,.2f}`
+• 止盈 +3.5x ATR: `${tp_p:,.2f}`
+─────────────────────
+*📊 市场信号*
+• ETF: `{etf_display_str}`  SOPR: `{s_sopr:.4f}`
 {streak_str}
+─────────────────────
 {fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
             
         else:
-            msg = f"""💤 **Hyperliquid 策略今日观望 (FLAT)**
-📅 **日       期**: {dt_today}
-📊 **最新美股交易日**: ETF {etf_display_str} | SOPR 28MA = {s_sopr:.4f}
+            msg = f"""💤 *Hyperliquid 策略今日观望*
+📅 `{dt_today}`
+─────────────────────
+*📊 市场信号*
+• ETF: `{etf_display_str}`
+• SOPR 28MA: `{s_sopr:.4f}`
 {streak_str}
-当前无持仓，等待下一个明确开仓信号。
-📝 **操作建议**: {action_str} ({pos_rec_str})
+─────────────────────
+*📝 操作建议*
+当前无持仓，等待明确开仓信号。
+{action_str}  `({pos_rec_str})`
+─────────────────────
 {fng_str}
 {ahr_str}"""
             send_telegram_message(msg)
